@@ -1,0 +1,59 @@
+{
+  "Prime Sieve (CPU/Memory)": {
+    "JavaScript": 0.0410,
+    "Python": 0.1124,
+    "Rust": 0.1354,
+    "Go": 0.1412,
+    "C++": 0.1498,
+    "C": 0.2565
+  },
+  "Fibonacci (Recursion/Stack)": {
+    "Assembly": 0.2641,
+    "C": 0.2711,
+    "C++": 0.2756,
+    "Rust": 0.3165,
+    "Go": 0.3328,
+    "JavaScript": 0.6022,
+    "Python": 7.2866
+  },
+  "Binary Tree (Alloc/GC)": {
+    "JavaScript": 0.0350,
+    "C": 0.1380,
+    "Go": 0.1382,
+    "C++": 0.1407,
+    "Rust": 0.1625,
+    "Python": 0.7081
+  },
+  "Word Count (String/Hash)": {
+    "Rust": 0.2756,
+    "C": 0.3747,
+    "Go": 0.4031,
+    "C++": 0.4576,
+    "Python": 0.5397,
+    "JavaScript": 0.6725
+  },
+  "Matrix Mul (Numeric)": {
+    "JavaScript": 0.1488,
+    "C": 0.2254,
+    "C++": 0.2312,
+    "Go": 0.2382,
+    "Rust": 0.3205,
+    "Python": 3.4668
+  },
+  "Concurrency (Spawn)": {
+    "JavaScript": 0.0342,
+    "C": 0.1297,
+    "C++": 0.1359,
+    "Go": 0.1532,
+    "Rust": 0.1557,
+    "Python": 0.3103
+  },
+  "Graphics (Mandelbrot)": {
+    "JavaScript": 0.5958,
+    "C": 0.6559,
+    "Go": 0.6656,
+    "Rust": 0.6811,
+    "C++": 0.7109,
+    "Python": 19.4273
+  }
+}

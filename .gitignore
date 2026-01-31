@@ -1,0 +1,29 @@
+# Systems
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# C/C++
+*.o
+*.d
+main
+
+# Rust
+target/
+**/*.rs.bk
+
+# Go
+main
+
+# Node
+node_modules/
+
+# Generated Data
+benchmarks/data/input.txt
+
+# Editors
+.vscode/
+.idea/
