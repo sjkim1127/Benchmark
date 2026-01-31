@@ -47,8 +47,14 @@ We tested 6 different computational domains:
 - **Rust** dominates in system-heavy tasks like String processing and HashMaps.
 - **C/C++** remain the kings of raw function call performance (Fibonacci), beating even handwritten Assembly.
 - **Python** is generally slower but can perform decently with idiomatic optimizations (e.g., slice assignment).
-- **Handwritten Assembly** is not guaranteed to be faster than `-O3` optimized C/C++.
+- **Handwritten Assembly** is not guaranteed to be faster than `-O3` optimized C/C++, but SIMD (NEON) optimization provides significant gains in numeric tasks.
 
-## License
+## ⚠️ A Note on Python Performance
+
+The Python benchmarks in this suite are implemented using **Pure Python** (standard library only) to measure the raw performance of the interpreter's execution engine.
+
+- In real-world production environments, heavy numeric tasks (like Matrix Mul) would typically use **NumPy** or **PyTorch**, which are backed by highly optimized C/Fortran/Assembly kernels.
+- Using such libraries would likely bring Python's performance close to C/C++.
+- These results should be interpreted as a measure of the language's intrinsic execution overhead, not its potential with external library support.
 
 MIT

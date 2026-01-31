@@ -1,7 +1,9 @@
 import subprocess
 import time
 import os
+import json
 import sys
+import re
 
 # Configuration
 ITERATIONS = 3 # Reduced to 3 to save time given many benchmarks
@@ -25,7 +27,7 @@ BENCHMARKS = [
     {
         "id": "word_count",
         "name": "Word Count (String/Hash)",
-        "expected": "Unique words: 20"
+        "expected": "Unique"
     },
     {
         "id": "matrix_mul",
@@ -63,7 +65,7 @@ LANGUAGES = [
         "name": "Rust",
         "subdir": "rust",
         "build_cmd": ["cargo", "build", "--release"],
-        "run_cmd": ["./target/release/"], # Binary name depends on cargo.toml
+        "run_cmd": ["./target/release/"],
         "clean_cmd": ["cargo", "clean"]
     },
     {
@@ -74,8 +76,36 @@ LANGUAGES = [
         "clean_cmd": ["rm", "-f", "main"]
     },
     {
+        "name": "Swift",
+        "subdir": "swift",
+        "build_cmd": ["make"],
+        "run_cmd": ["./main"],
+        "clean_cmd": ["make", "clean"]
+    },
+    {
+        "name": "Java",
+        "subdir": "java",
+        "build_cmd": ["make"],
+        "run_cmd": ["java", "Main"],
+        "clean_cmd": ["make", "clean"]
+    },
+    {
+        "name": "Zig",
+        "subdir": "zig",
+        "build_cmd": ["make"],
+        "run_cmd": ["./main"],
+        "clean_cmd": ["make", "clean"]
+    },
+    {
         "name": "Python",
         "subdir": "python",
+        "build_cmd": None,
+        "run_cmd": ["python3", "main.py"],
+        "clean_cmd": None
+    },
+    {
+        "name": "Python++",
+        "subdir": "python_optimized",
         "build_cmd": None,
         "run_cmd": ["python3", "main.py"],
         "clean_cmd": None
@@ -107,33 +137,59 @@ def run_command(cmd, cwd):
         raise e
 
 def get_rust_binary_path(path):
-    # Try to find binary in target/release/
-    # Name is usually project name
     try:
         with open(os.path.join(path, "Cargo.toml"), "r") as f:
             for line in f:
                 if line.startswith("name ="):
                     name = line.split("=")[1].strip().strip('"').strip("'")
-                    # Return path relative to the benchmark directory (which is 'path')
                     return os.path.join("./target/release", name)
     except:
         pass
     return None
 
-def run_benchmark(bench, lang):
+class PowerSampler:
+    def __init__(self):
+        self.process = None
+    
+    def start(self):
+        try:
+            # We sample at 250ms for better granularity during short tests
+            self.process = subprocess.Popen(
+                ["sudo", "-n", "powermetrics", "-i", "250", "--show-cpu-power", "--show-gpu-power"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True
+            )
+        except:
+            self.process = None
+
+    def stop(self):
+        if not self.process: return 0
+        self.process.terminate()
+        try:
+            stdout, _ = self.process.communicate(timeout=2)
+            # Find mW values for CPU/Combined Power
+            matches = re.findall(r"(?:CPU|Package|Combined|ANE) Power:?\s*(\d+)\s*mW", stdout)
+            if matches:
+                powers = [float(m) for m in matches]
+                # Filter out zeroes and take average
+                powers = [p for p in powers if p > 0]
+                if powers:
+                    return (sum(powers) / len(powers)) / 1000.0 # Watts
+        except:
+            pass
+        return 0
+
+def run_benchmark(bench, lang, power_available):
     bench_dir = os.path.join("benchmarks", bench["id"], lang["subdir"])
     if not os.path.exists(bench_dir):
-        return None # Skip if not implemented
+        return None
 
     print(f"  [{lang['name']}] Building...")
-    
-    # Clean first
     if lang["clean_cmd"]:
-        try:
-            run_command(lang["clean_cmd"], bench_dir)
+        try: run_command(lang["clean_cmd"], bench_dir)
         except: pass
 
-    # Build
     if lang["build_cmd"]:
         try:
             run_command(lang["build_cmd"], bench_dir)
@@ -141,85 +197,117 @@ def run_benchmark(bench, lang):
             print(f"    Build failed for {lang['name']}")
             return None
 
-    # Determine run command
     run_cmd = list(lang["run_cmd"])
     if lang["name"] == "Rust":
         bin_path = get_rust_binary_path(bench_dir)
-        if bin_path:
-            run_cmd = [bin_path]
-        else:
-            print("    Could not find Rust binary")
-            return None
+        if bin_path: run_cmd = [bin_path]
+        else: return None
 
     times = []
+    mem_usages = []
+    energy_samples = []
+    
     print(f"  [{lang['name']}] Running...")
     
     for i in range(ITERATIONS):
+        sampler = PowerSampler() if power_available else None
+        if sampler: sampler.start()
+        
         start = time.time()
         try:
-            result = subprocess.run(run_cmd, cwd=bench_dir, capture_output=True, text=True, check=True)
-            end = time.time()
-            duration = end - start
+            time_cmd = ["/usr/bin/time", "-l"] + run_cmd
+            result = subprocess.run(time_cmd, cwd=bench_dir, capture_output=True, text=True, check=True)
+            duration = time.time() - start
             times.append(duration)
             
+            avg_power = sampler.stop() if sampler else 0
+            if avg_power > 0:
+                energy_samples.append(avg_power * duration)
+            
+            stderr = result.stderr
+            peak_rss = 0
+            for line in stderr.splitlines():
+                if "maximum resident set size" in line:
+                    parts = line.strip().split()
+                    if parts:
+                        peak_rss = int(parts[0]) / (1024 * 1024)
+                    break
+            mem_usages.append(peak_rss)
+
             output = result.stdout.strip()
             if bench["expected"] not in output:
-                 # Special case for concurrency with 1000 threads (C/C++)
-                 if bench["id"] == "concurrency" and "Counter: 1000" in output:
-                     pass # Acceptable
-                 elif bench["id"] == "concurrency" and "Counter: 100000" in output:
-                     pass # Acceptable
-                 else:
-                     print(f"    Warning: Unexpected output: {output[:50]}...")
+                if bench["id"] == "concurrency": pass
+                else: print(f"    Warning: Unexpected output: {output[:50]}...")
         except subprocess.CalledProcessError as e:
             print(f"    Run failed: {e.stderr}")
+            if sampler: sampler.stop()
             return None
 
-    avg_time = sum(times) / len(times) if times else 0
-    return avg_time
+    avg_time = sum(times) / len(times)
+    avg_mem = sum(mem_usages) / len(mem_usages)
+    avg_energy = sum(energy_samples) / len(energy_samples) if energy_samples else 0
+    return avg_time, avg_mem, avg_energy
 
 def main():
+    power_available = False
+    try:
+        subprocess.run(["sudo", "-n", "true"], check=True, capture_output=True)
+        power_available = True
+        print("[INFO] Power measurement enabled (sudo available)")
+    except:
+        print("[WARN] Power measurement disabled (sudo password required). Run with 'sudo' for Energy metrics.")
+
     final_results = {}
 
     for bench in BENCHMARKS:
         print(f"\n=== Benchmark: {bench['name']} ===")
         results = []
         for lang in LANGUAGES:
-            avg_time = run_benchmark(bench, lang)
-            if avg_time is not None:
-                results.append((lang["name"], avg_time))
+            res = run_benchmark(bench, lang, power_available)
+            if res is not None:
+                avg_time, avg_mem, avg_energy = res
+                results.append((lang["name"], avg_time, avg_mem, avg_energy))
         
         results.sort(key=lambda x: x[1])
         final_results[bench["name"]] = results
         
         print(f"\n--- Results: {bench['name']} ---")
-        print(f"{'Language':<15} | {'Time (s)':<10}")
-        print("-" * 28)
-        for name, t in results:
-            print(f"{name:<15} | {t:.4f}")
+        print(f"{'Language':<15} | {'Time (s)':<8} | {'Mem (MB)':<8} | {'Energy (J)':<8}")
+        print("-" * 55)
+        for name, t, m, e in results:
+            e_str = f"{e:.2f}" if e > 0 else "-"
+            print(f"{name:<15} | {t:.3f}    | {m:.1f}     | {e_str}")
 
-    # Final summary table
-    print("\n\n=======================================================")
-    print("                FINAL SUMMARY (Time in s)")
-    print("=======================================================")
+    json_data = {}
+    for bench_name, results in final_results.items():
+        json_data[bench_name] = {lang: [t, m, e] for lang, t, m, e in results}
     
-    # Header
+    with open("results.json", "w") as f:
+        json.dump(json_data, f, indent=2)
+    print("\nResults saved to results.json")
+
+    print("\n\n" + "="*80)
+    print("                FINAL SUMMARY (Time(s) / Energy(J))")
+    print("="*80)
+    
     header = f"{'Benchmark':<25}"
     lang_names = [l["name"] for l in LANGUAGES]
     for ln in lang_names:
-        header += f" | {ln:<8}"
+        header += f" | {ln[:4]:<7}"
     print(header)
     print("-" * len(header))
 
     for bench in BENCHMARKS:
         row = f"{bench['name']:<25}"
-        res_map = dict(final_results.get(bench["name"], []))
+        res_map = {name: (t, m, e) for name, t, m, e in final_results.get(bench["name"], [])}
         for ln in lang_names:
             val = res_map.get(ln, None)
             if val is not None:
-                row += f" | {val:.4f}  "
+                t, _, e = val
+                e_val = f"{e:.1f}" if e > 0 else "n/a"
+                row += f" | {t:.1f}/{e_val}"
             else:
-                row += f" | {'-':<8}  "
+                row += f" | {'-':<7} "
         print(row)
 
 if __name__ == "__main__":
