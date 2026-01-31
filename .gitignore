@@ -18,8 +18,8 @@ target/
 # Go
 main
 
-# Node
-node_modules/
+# Java
+*.class
 
 # Generated Data
 benchmarks/data/input.txt
